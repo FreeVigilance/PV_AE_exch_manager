@@ -390,6 +390,7 @@ class MessageSummaryView(ActiveUserCompanyRequiredMixin, APIView):
             elif user.company.company_type == "slave":
                 sent_queryset = Message.objects.filter(
                     sender_company_id=user.company_id,
+                    created_by=user,
                     is_deleted=False,
                 )
                 drafts = sent_queryset.filter(status=Message.STATUS_DRAFT).count()
@@ -426,6 +427,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
             .prefetch_related("attachments")
             .filter(
                 sender_company=user.company,
+                created_by=user,
                 status=Message.STATUS_DRAFT,
                 is_deleted=False,
             )
@@ -503,7 +505,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE company can edit drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can edit only your own drafts.")
 
         changed = False
@@ -564,7 +566,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE company can delete drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can delete only your own drafts.")
 
         with transaction.atomic():
@@ -615,7 +617,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE can send drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can send only your own drafts.")
 
         with transaction.atomic():
@@ -696,7 +698,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE can attach files.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can attach files only to your own drafts.")
 
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
@@ -931,7 +933,7 @@ class SentViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet)
         queryset = (
             Message.objects.select_related("sender_company", "receiver_company")
             .prefetch_related("attachments")
-            .filter(sender_company=user.company, is_deleted=False)
+            .filter(sender_company=user.company, created_by=user, is_deleted=False)
             .exclude(status=Message.STATUS_DRAFT)
             .order_by("-created_at")
         )

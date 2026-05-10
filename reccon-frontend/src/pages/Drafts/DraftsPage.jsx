@@ -193,8 +193,8 @@ export default function DraftsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [filtersDraft, setFiltersDraft] = useState({
-    dateFrom: "29.12.2025",
-    dateTo: "29.12.2026",
+    dateFrom: "01.01.2026",
+    dateTo: "31.12.2026",
     statuses: new Set(),
   });
 

@@ -126,8 +126,8 @@
 }
 
 .recon-details__messagesCard {
-  --recon-table-cols: 128px minmax(0, 1fr) 190px 190px;
-  --recon-table-gap: 28px;
+  --recon-table-cols: 128px minmax(0, 1fr) 190px 230px 32px;
+  --recon-table-gap: 24px;
   --recon-table-pad-x: 40px;
   --recon-table-scrollbar: 12px;
 
@@ -145,7 +145,7 @@
 }
 
 .recon-details__messagesCard.is-slave-view {
-  --recon-table-cols: 128px minmax(0, 1fr) 190px 190px 20px;
+  --recon-table-cols: 128px minmax(0, 1fr) 190px 230px 32px;
 }
 
 .recon-details__tabs {
@@ -211,8 +211,18 @@
   text-overflow: ellipsis;
 }
 
-.recon-details__headCell--selector {
+/* .recon-details__headCell--selector {
   justify-content: flex-end;
+} */
+ .recon-details__headCell--selector {
+  justify-content: center;
+}
+
+.recon-details__cellSelector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
 }
 
 .recon-details__cellDate,
@@ -308,11 +318,18 @@
   min-width: 0;
 }
 
-.recon-details__cellSelector {
+/* .recon-details__cellSelector {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   min-width: 20px;
+} */
+
+.recon-details__cellSelector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
 }
 
 .recon-details__confirmedDate {
@@ -578,13 +595,21 @@
     margin-left: 0;
   }
 
-  .recon-details__messagesCard {
+  /* .recon-details__messagesCard {
     --recon-table-cols: 120px minmax(0, 1fr) 170px 180px;
     --recon-table-pad-x: 24px;
   }
 
   .recon-details__messagesCard.is-slave-view {
     --recon-table-cols: 120px minmax(0, 1fr) 170px 180px 20px;
+  } */
+  .recon-details__messagesCard {
+    --recon-table-cols: 120px minmax(0, 1fr) 170px 210px 32px;
+    --recon-table-pad-x: 24px;
+  }
+
+  .recon-details__messagesCard.is-slave-view {
+    --recon-table-cols: 120px minmax(0, 1fr) 170px 210px 32px;
   }
 
   .recon-details__tableHead {

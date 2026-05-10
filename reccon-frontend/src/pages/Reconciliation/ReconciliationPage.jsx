@@ -72,23 +72,23 @@ export default function ReconciliationPage() {
 
   const [filtersDraft, setFiltersDraft] = useState({
     company: "Все",
-    dateFrom: "29.12.2025",
-    dateTo: "29.12.2026",
+    dateFrom: "01.01.2026",
+    dateTo: "31.12.2026",
     status: "all",
   });
 
   const [filtersApplied, setFiltersApplied] = useState({
     company: "Все",
-    dateFrom: "29.12.2025",
-    dateTo: "29.12.2026",
+    dateFrom: "01.01.2026",
+    dateTo: "31.12.2026",
     status: "all",
   });
 
   const [startDraft, setStartDraft] = useState({
     companyId: null,
     company: "",
-    dateFrom: "29.12.2025",
-    dateTo: "29.12.2026",
+    dateFrom: "01.01.2026",
+    dateTo: "31.12.2026",
   });
 
   useEffect(() => {
@@ -246,8 +246,8 @@ export default function ReconciliationPage() {
     setStartDraft({
       companyId: null,
       company: "",
-      dateFrom: "29.12.2025",
-      dateTo: "29.12.2026",
+      dateFrom: "01.01.2026",
+      dateTo: "31.12.2026",
     });
     setStartError("");
     setStartCompanySearch("");

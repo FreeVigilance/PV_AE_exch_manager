@@ -32,7 +32,6 @@ from apps.attachments.api import build_attachment_download_url
 from apps.reconciliations.models import Reconciliation
 
 
-
 class AttachmentStorageUnavailable(APIException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     default_detail = (
@@ -321,6 +320,9 @@ class DraftSerializer(FrontendMessageSerializer):
     def get_number(self, obj):
         return obj.sender_number or ""
 
+    def get_date(self, obj):
+        return format_front_date(obj.updated_at or obj.created_at)
+
 
 class InboxSerializer(FrontendMessageSerializer):
     def get_company(self, obj):
@@ -378,14 +380,19 @@ class MessageSummaryView(ActiveUserCompanyRequiredMixin, APIView):
         if user.company_id:
             if user.company.company_type == "master":
                 inbox_queryset = Message.objects.filter(
-                    receiver_company_id=user.company_id
+                    receiver_company_id=user.company_id,
+                    is_deleted=False,
                 ).exclude(status=Message.STATUS_DRAFT)
                 inbox = inbox_queryset.count()
                 inbox_unconfirmed = inbox_queryset.filter(
                     status__in=[Message.STATUS_PENDING, Message.STATUS_READ]
                 ).count()
             elif user.company.company_type == "slave":
-                sent_queryset = Message.objects.filter(sender_company_id=user.company_id)
+                sent_queryset = Message.objects.filter(
+                    sender_company_id=user.company_id,
+                    created_by=user,
+                    is_deleted=False,
+                )
                 drafts = sent_queryset.filter(status=Message.STATUS_DRAFT).count()
                 sent = sent_queryset.exclude(status=Message.STATUS_DRAFT).count()
                 sent_unconfirmed = sent_queryset.filter(
@@ -418,8 +425,13 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
         return (
             Message.objects.select_related("sender_company", "receiver_company")
             .prefetch_related("attachments")
-            .filter(sender_company=user.company, status=Message.STATUS_DRAFT)
-            .order_by("-created_at")
+            .filter(
+                sender_company=user.company,
+                created_by=user,
+                status=Message.STATUS_DRAFT,
+                is_deleted=False,
+            )
+            .order_by("-updated_at", "-created_at")
         )
 
     def create(self, request, *args, **kwargs):
@@ -467,12 +479,17 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
                 event_type="message_draft_created",
                 entity_type="message",
                 entity_id=message.id,
-                payload={
+                old_values={},
+                new_values={
                     "status": message.status,
                     "sender_company_id": message.sender_company_id,
                     "receiver_company_id": message.receiver_company_id,
                     "subject": message.subject,
+                    "created_by_id": message.created_by_id,
+                    "created_by_username": request.user.username,
                 },
+                reason="draft created by user",
+                request=request,
             )
             write_outbox(
                 event_type="message_draft_created",
@@ -488,7 +505,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE company can edit drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can edit only your own drafts.")
 
         changed = False
@@ -496,18 +513,46 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
         body = request.data.get("text")
         body_html = request.data.get("html")
 
+        old_values = {
+            "subject": draft.subject,
+            "body": draft.body,
+            "body_html": draft.body_html,
+        }
+
         if subject is not None:
             draft.subject = str(subject)
             changed = True
+
         if body is not None:
             draft.body = str(body)
             changed = True
+
         if body_html is not None:
             draft.body_html = str(body_html)
             changed = True
 
-        if changed:
+        should_write_audit = request.data.get("audit") is True
+
+        new_values = {
+            "subject": draft.subject,
+            "body": draft.body,
+            "body_html": draft.body_html,
+        }
+
+        if changed and old_values != new_values:
             draft.save(update_fields=["subject", "body", "body_html", "updated_at"])
+
+            if should_write_audit:
+                write_audit(
+                    actor=request.user,
+                    event_type="message_draft_updated",
+                    entity_type="message",
+                    entity_id=draft.id,
+                    old_values=old_values,
+                    new_values=new_values,
+                    reason="draft explicitly updated and saved by user",
+                    request=request,
+                )
 
         serializer = self.get_serializer(draft, context={"request": request})
         return ok(serializer.data)
@@ -521,25 +566,46 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE company can delete drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can delete only your own drafts.")
 
         with transaction.atomic():
-            attachment_keys = list(draft.attachments.values_list("storage_key", flat=True))
-            message_id = draft.id
-            draft.delete()
-            for storage_key in attachment_keys:
-                try:
-                    delete_object(storage_key)
-                except Exception:
-                    pass
+            old_values = {
+                "status": draft.status,
+                "subject": draft.subject,
+                "body": draft.body,
+                "body_html": draft.body_html,
+                "is_deleted": draft.is_deleted,
+            }
+
+            draft.is_deleted = True
+            draft.deleted_at = timezone.now()
+            draft.deleted_by = request.user
+            draft.delete_reason = "draft deleted by user"
+            draft.save(
+                update_fields=[
+                    "is_deleted",
+                    "deleted_at",
+                    "deleted_by",
+                    "delete_reason",
+                    "updated_at",
+                ]
+            )
 
             write_audit(
                 actor=request.user,
                 event_type="message_draft_deleted",
                 entity_type="message",
-                entity_id=message_id,
-                payload={},
+                entity_id=draft.id,
+                old_values=old_values,
+                new_values={
+                    "is_deleted": draft.is_deleted,
+                    "deleted_at": draft.deleted_at.isoformat() if draft.deleted_at else None,
+                    "deleted_by": request.user.username,
+                    "delete_reason": draft.delete_reason,
+                },
+                reason="draft deleted by user",
+                request=request,
             )
 
         return ok(status=status.HTTP_204_NO_CONTENT)
@@ -551,10 +617,16 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE can send drafts.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can send only your own drafts.")
 
         with transaction.atomic():
+            old_values = {
+                "status": draft.status,
+                "sender_number": draft.sender_number,
+                "created_by_id": draft.created_by_id,
+            }
+
             if not draft.sender_number:
                 draft.sender_number = generate_next_sender_number(user.company)
 
@@ -562,23 +634,54 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
                 draft.created_by = request.user
 
             draft.status = Message.STATUS_PENDING
-            draft.save(update_fields=["sender_number", "status", "updated_at"])
+            draft.save(
+                update_fields=[
+                    "sender_number",
+                    "created_by",
+                    "status",
+                    "updated_at",
+                ]
+            )
 
             write_audit(
                 actor=request.user,
                 event_type="message_sent",
                 entity_type="message",
                 entity_id=draft.id,
-                payload={
-                    "new_status": draft.status,
+                old_values=old_values,
+                new_values={
+                    "status": draft.status,
+                    "sender_number": draft.sender_number,
+                    "created_by_id": draft.created_by_id,
                     "sender_company_id": draft.sender_company_id,
                     "receiver_company_id": draft.receiver_company_id,
                 },
+                reason="draft sent as message",
+                request=request,
             )
             write_outbox(
                 event_type="message_sent",
                 payload={"message_id": draft.id},
             )
+
+            if draft.late_send_reconciliation_id:
+                write_audit(
+                    actor=request.user,
+                    event_type="reconciliation_late_message_sent",
+                    entity_type="reconciliation",
+                    entity_id=draft.late_send_reconciliation_id,
+                    old_values={},
+                    new_values={
+                        "message_id": draft.id,
+                        "sender_company_id": draft.sender_company_id,
+                        "receiver_company_id": draft.receiver_company_id,
+                        "sender_number": draft.sender_number,
+                        "status": draft.status,
+                        "subject": draft.subject,
+                    },
+                    reason="late message sent from reconciliation",
+                    request=request,
+                )
 
         serializer = SentSerializer(draft, context={"request": request})
         return ok(serializer.data)
@@ -595,7 +698,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         if not user.company or user.company.company_type != "slave":
             raise PermissionDenied("Only SLAVE can attach files.")
-        if draft.sender_company_id != user.company_id or draft.status != Message.STATUS_DRAFT:
+        if (draft.sender_company_id != user.company_id or draft.created_by_id != user.id or draft.status != Message.STATUS_DRAFT):
             raise PermissionDenied("You can attach files only to your own drafts.")
 
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
@@ -604,6 +707,9 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
 
         with transaction.atomic():
             attach_uploaded_files(request=request, message=draft, files=files)
+            draft.save(update_fields=["updated_at"])
+
+        draft.refresh_from_db()
 
         serializer = self.get_serializer(draft, context={"request": request})
         return ok(serializer.data, status=status.HTTP_201_CREATED)
@@ -621,7 +727,7 @@ class InboxViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet
         queryset = (
             Message.objects.select_related("sender_company", "receiver_company")
             .prefetch_related("attachments")
-            .filter(receiver_company=user.company)
+            .filter(receiver_company=user.company, is_deleted=False)
             .exclude(status=Message.STATUS_DRAFT)
             .order_by("-created_at")
         )
@@ -689,6 +795,10 @@ class InboxViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet
 
         with transaction.atomic():
             if message.status == Message.STATUS_PENDING:
+                old_values = {
+                    "status": message.status,
+                    "read_at": message.read_at.isoformat() if message.read_at else None,
+                }
                 message.status = Message.STATUS_READ
                 message.read_at = timezone.now()
                 message.save(update_fields=["status", "read_at", "updated_at"])
@@ -698,10 +808,13 @@ class InboxViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet
                     event_type="message_opened",
                     entity_type="message",
                     entity_id=message.id,
-                    payload={
-                        "new_status": message.status,
+                    old_values=old_values,
+                    new_values={
+                        "status": message.status,
                         "read_at": message.read_at.isoformat() if message.read_at else None,
                     },
+                    reason="message opened by receiver",
+                    request=request,
                 )
                 write_outbox(
                     event_type="message_opened",
@@ -736,6 +849,13 @@ class InboxViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet
             raise ValidationError("receiver_number is already taken.")
 
         with transaction.atomic():
+            old_values = {
+                "status": message.status,
+                "receiver_number": message.receiver_number,
+                "read_at": message.read_at.isoformat() if message.read_at else None,
+                "confirmed_at": message.confirmed_at.isoformat() if message.confirmed_at else None,
+                "confirmed_by_id": message.confirmed_by_id,
+            }
             register_receiver_number(user.company, receiver_number)
 
             if message.status == Message.STATUS_PENDING and message.read_at is None:
@@ -761,12 +881,17 @@ class InboxViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet
                 event_type="message_confirmed",
                 entity_type="message",
                 entity_id=message.id,
-                payload={
-                    "new_status": message.status,
-                    "confirmed_at": message.confirmed_at.isoformat()
-                    if message.confirmed_at
-                    else None,
+                old_values=old_values,
+                new_values={
+                    "status": message.status,
+                    "receiver_number": message.receiver_number,
+                    "read_at": message.read_at.isoformat() if message.read_at else None,
+                    "confirmed_at": message.confirmed_at.isoformat() if message.confirmed_at else None,
+                    "confirmed_by_id": message.confirmed_by_id,
+                    "confirmed_by_username": request.user.username,
                 },
+                reason="message confirmed by receiver",
+                request=request,
             )
             write_outbox(
                 event_type="message_confirmed",
@@ -808,7 +933,7 @@ class SentViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet)
         queryset = (
             Message.objects.select_related("sender_company", "receiver_company")
             .prefetch_related("attachments")
-            .filter(sender_company=user.company)
+            .filter(sender_company=user.company, created_by=user, is_deleted=False)
             .exclude(status=Message.STATUS_DRAFT)
             .order_by("-created_at")
         )
@@ -912,6 +1037,24 @@ class SentViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet)
                 event_type="message_sent",
                 payload={"message_id": message.id},
             )
+            if message.late_send_reconciliation_id:
+                write_audit(
+                    actor=request.user,
+                    event_type="reconciliation_late_message_sent",
+                    entity_type="reconciliation",
+                    entity_id=message.late_send_reconciliation_id,
+                    old_values={},
+                    new_values={
+                        "message_id": message.id,
+                        "sender_company_id": message.sender_company_id,
+                        "receiver_company_id": message.receiver_company_id,
+                        "sender_number": message.sender_number,
+                        "status": message.status,
+                        "subject": message.subject,
+                    },
+                    reason="late message sent from reconciliation",
+                    request=request,
+                )
 
         serializer = self.get_serializer(message, context={"request": request})
         return ok(serializer.data, status=status.HTTP_201_CREATED)

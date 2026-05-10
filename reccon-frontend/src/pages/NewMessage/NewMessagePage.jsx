@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { Button } from "../../components/Button/Button";
 import { Input } from "../../components/Input/Input";
@@ -272,6 +272,66 @@ export default function NewMessagePage() {
   const autosaveTimerRef = useRef(null);
   const lastSyncedSignatureRef = useRef("");
   const hasRestoredComposeStateRef = useRef(false);
+  const isPageUnloadingRef = useRef(false);
+
+  useEffect(() => {
+    const markPageUnload = () => {
+      isPageUnloadingRef.current = true;
+    };
+
+    window.addEventListener("beforeunload", markPageUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", markPageUnload);
+
+      if (!isPageUnloadingRef.current) {
+        const latestState = {
+          draftId: draftIdRef.current,
+          subject: subjectRef.current,
+          text: editorRef.current?.textContent || editorTextRef.current || "",
+          html: editorRef.current?.innerHTML || editorHtmlRef.current || "",
+          attachments: attachmentsRef.current || [],
+        };
+
+        const hasContent = isMeaningfulDraftContent({
+          text: latestState.text,
+          attachments: latestState.attachments,
+        });
+
+        if (isSlave && hasContent) {
+          if (latestState.draftId) {
+            messagesApi
+              .updateDraft(
+                latestState.draftId,
+                {
+                  subject: latestState.subject,
+                  text: latestState.text,
+                  html: latestState.html,
+                },
+                { audit: true }
+              )
+              .catch((error) => {
+                console.error("Не удалось сохранить черновик при выходе со страницы", error);
+              });
+          } else {
+            messagesApi
+              .createDraft({
+                subject: latestState.subject,
+                text: latestState.text,
+                html: latestState.html,
+                attachments: latestState.attachments,
+                reconciliationId,
+              })
+              .catch((error) => {
+                console.error("Не удалось создать черновик при выходе со страницы", error);
+              });
+          }
+        }
+
+        clearComposeState(composeStorageKey);
+      }
+    };
+  }, [composeStorageKey, isSlave, reconciliationId]);
 
   useEffect(() => {
     hasRestoredComposeStateRef.current = false;
@@ -426,9 +486,28 @@ export default function NewMessagePage() {
   const syncDraftNow = async ({ force = false } = {}) => {
     if (!isSlave) return null;
 
-    if (syncPromiseRef.current) {
-      resyncRequestedRef.current = true;
-      return syncPromiseRef.current;
+      if (syncPromiseRef.current) {
+      const syncedDraftId = await syncPromiseRef.current;
+
+      // Получаем состояние ПОСЛЕ того как первый sync завершился и draftIdRef обновился
+      const latestState = getCurrentComposeState();
+      const localAttachments = latestState.attachments.filter(
+        (attachment) => attachment?.isLocal && attachment?.file
+      );
+      const latestSignature = buildSyncedSignature(latestState);
+
+      if (
+        force ||
+        localAttachments.length > 0 ||
+        latestSignature !== lastSyncedSignatureRef.current
+      ) {
+        resyncRequestedRef.current = true;
+        window.setTimeout(() => {
+          syncDraftNow({ force: true }).catch(() => {});
+        }, 0);
+      }
+
+      return syncedDraftId;
     }
 
     const currentState = getCurrentComposeState();
@@ -466,11 +545,15 @@ export default function NewMessagePage() {
             reconciliationId,
           });
         } else {
-          draft = await messagesApi.updateDraft(currentState.draftId, {
-            subject: currentState.subject,
-            text: currentState.text,
-            html: currentState.html,
-          });
+          draft = await messagesApi.updateDraft(
+            currentState.draftId,
+            {
+              subject: currentState.subject,
+              text: currentState.text,
+              html: currentState.html,
+            },
+            { audit: force === true }
+          );
 
           if (localAttachments.length > 0) {
             draft = await messagesApi.uploadDraftAttachments(
@@ -497,7 +580,7 @@ export default function NewMessagePage() {
         if (resyncRequestedRef.current) {
           resyncRequestedRef.current = false;
           window.setTimeout(() => {
-            syncDraftNow({ force: true }).catch(() => { });
+            syncDraftNow({ force: true }).catch(() => {});
           }, 0);
         }
       }
@@ -700,9 +783,6 @@ export default function NewMessagePage() {
 
     if (valid.length > 0) {
       setAttachments((prev) => [...prev, ...valid]);
-      window.setTimeout(() => {
-        syncDraftNow({ force: true }).catch(() => { });
-      }, 0);
     }
 
     e.target.value = "";
@@ -713,17 +793,18 @@ export default function NewMessagePage() {
   };
 
   const handleAttachmentRemove = async (attachmentId) => {
-    const toRemove = attachmentsRef.current.find((item) => item.id === attachmentId);
+    const currentAttachments = attachmentsRef.current || [];
+    const toRemove = currentAttachments.find((item) => item.id === attachmentId);
+    const nextAttachments = currentAttachments.filter((item) => item.id !== attachmentId);
 
-    setAttachments((prev) => {
-      const target = prev.find((item) => item.id === attachmentId);
-      if (target?.isLocal && target?.url) {
-        try {
-          URL.revokeObjectURL(target.url);
-        } catch { }
-      }
-      return prev.filter((item) => item.id !== attachmentId);
-    });
+    if (toRemove?.isLocal && toRemove?.url) {
+      try {
+        URL.revokeObjectURL(toRemove.url);
+      } catch {}
+    }
+
+    attachmentsRef.current = nextAttachments;
+    setAttachments(nextAttachments);
 
     if (!toRemove || toRemove.isLocal) {
       return;
@@ -732,9 +813,13 @@ export default function NewMessagePage() {
     try {
       await messagesApi.deleteAttachment(toRemove);
       lastSyncedSignatureRef.current = "";
+      window.dispatchEvent(new CustomEvent(messagesApi.events.MESSAGE_CHANGED_EVENT));
     } catch (error) {
       console.error("Не удалось удалить вложение", error);
       setFileError(error.message || "Не удалось удалить вложение.");
+
+      attachmentsRef.current = currentAttachments;
+      setAttachments(currentAttachments);
     }
   };
 
@@ -743,19 +828,33 @@ export default function NewMessagePage() {
 
     if (autosaveTimerRef.current) {
       window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    if (!draftIdRef.current) {
+      return;
     }
 
     if (!isMeaningfulDraftContent({ text: editorText, attachments })) {
       return;
     }
 
+    const hasLocalAttachments = attachments.some(
+      (attachment) => attachment?.isLocal && attachment?.file
+    );
+
+    if (hasLocalAttachments) {
+      return;
+    }
+
     autosaveTimerRef.current = window.setTimeout(() => {
-      syncDraftNow().catch(() => { });
+      syncDraftNow().catch(() => {});
     }, 1200);
 
     return () => {
       if (autosaveTimerRef.current) {
         window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
       }
     };
   }, [attachments, editorText, isSlave, reconciliationId, subject]);
@@ -782,25 +881,52 @@ export default function NewMessagePage() {
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (!isSlave || !hasMessageContent || isSubmitting) return;
+const handleSaveDraft = async () => {
+  if (!isSlave || !hasMessageContent || isSubmitting) return;
 
-    try {
-      setIsSubmitting(true);
-      await syncDraftNow({ force: true });
+  if (autosaveTimerRef.current) {
+    window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }
 
-      resetForm();
-      navigate("/drafts");
-    } catch (error) {
-      console.error("Не удалось сохранить черновик", error);
-      setFileError(error.message || "Не удалось сохранить черновик.");
-    } finally {
-      setIsSubmitting(false);
+  try {
+    setIsSubmitting(true);
+
+    const savedDraftId = await syncDraftNow({ force: true });
+
+    if (savedDraftId) {
+      const latestState = getCurrentComposeState();
+
+      const savedDraft = await messagesApi.updateDraft(
+        savedDraftId,
+        {
+          subject: latestState.subject,
+          text: latestState.text,
+          html: latestState.html,
+        },
+        { audit: true }
+      );
+
+      applyDraftResponse(savedDraft);
     }
-  };
+
+    resetForm();
+    navigate("/drafts");
+  } catch (error) {
+    console.error("Не удалось сохранить черновик", error);
+    setFileError(error.message || "Не удалось сохранить черновик.");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const handleSend = async () => {
     if (!isSlave || !hasMessageContent || isSubmitting) return;
+
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
 
     try {
       setIsSubmitting(true);

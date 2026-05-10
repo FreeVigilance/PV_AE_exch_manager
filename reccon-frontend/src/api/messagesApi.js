@@ -29,16 +29,22 @@ function normalizeApiPath(path) {
   const raw = String(path || "").trim();
   if (!raw) return raw;
 
+  let normalized = raw;
+
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     try {
       const url = new URL(raw);
-      return `${url.pathname}${url.search}${url.hash}`;
+      normalized = `${url.pathname}${url.search}${url.hash}`;
     } catch {
       return raw;
     }
   }
 
-  return raw;
+  if (normalized.startsWith("/api/")) {
+    normalized = normalized.slice(4);
+  }
+
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 async function requestAndNotify(path, options = {}) {
@@ -115,10 +121,13 @@ export const messagesApi = {
     });
   },
 
-  async updateDraft(draftId, patch) {
+  async updateDraft(draftId, patch, options = {}) {
     return await request(`/messages/drafts/${draftId}/`, {
       method: "PATCH",
-      body: patch,
+      body: {
+        ...patch,
+        audit: options.audit === true,
+      },
     });
   },
 
@@ -150,8 +159,9 @@ export const messagesApi = {
     const url =
       typeof attachment === "string"
         ? attachment
-        : attachment?.deleteUrl || `/attachments/attachments/${attachment?.id}/`;
+        : attachment?.deleteUrl || `/attachments/${attachment?.id}/`;
 
     await request(normalizeApiPath(url), { method: "DELETE" });
+    emitMessagesChanged();
   },
 };

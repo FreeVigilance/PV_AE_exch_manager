@@ -211,6 +211,18 @@
   text-overflow: ellipsis;
 }
 
+.recon-details__tableHead .recon-details__headCell:nth-child(3) {
+  transform: translateX(12px);
+}
+
+.recon-details__tableHead .recon-details__headCell:nth-child(4) {
+  transform: translateX(13px);
+}
+
+.recon-details__tableHead .recon-details__headCell:nth-child(5) {
+  transform: translateX(12px);
+}
+
 .recon-details__headCell--selector {
   justify-content: flex-end;
 }
@@ -313,7 +325,7 @@
   align-items: center;
   justify-content: flex-end;
   min-width: 20px;
-}
+} 
 
 .recon-details__confirmedDate {
   color: var(--success);

@@ -132,9 +132,7 @@ React Frontend
     ↓ REST API
 Django REST Framework Backend
     ↓
-PostgreSQL + MinIO / S3-compatible storage
-    ↓
-Worker для напоминаний
+PostgreSQL + MinIO
 ```
 
 ### Основные компоненты

@@ -169,12 +169,10 @@ PostgreSQL + MinIO
 
 - PostgreSQL
 - MinIO
-- S3-compatible storage
-- Cloudflare R2 для развернутой версии
+- Cloudflare R2 для развернутой версии на Railway
 
 ### Background jobs
 
-- Отдельный worker-процесс
 - Email-напоминания через SMTP
 - Обработка напоминаний по заданному интервалу
 

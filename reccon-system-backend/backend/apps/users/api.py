@@ -261,6 +261,33 @@ class UserAdminViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+
+        will_stop_being_active_master_admin = (
+            user.is_active
+            and user.is_company_admin
+            and user.company_id
+            and user.company.company_type == Company.TYPE_MASTER
+            and (
+                serializer.validated_data.get("resolved_company") != user.company
+                or serializer.validated_data.get("resolved_is_company_admin") is False
+            )
+        )
+
+        if will_stop_being_active_master_admin:
+            active_master_admins_count = User.objects.filter(
+                company=user.company,
+                company__company_type=Company.TYPE_MASTER,
+                is_company_admin=True,
+                is_active=True,
+            ).count()
+
+            if active_master_admins_count <= 1:
+                raise ValidationError(
+                    {
+                        "detail": "Нельзя убрать роль администратора или изменить компанию у единственного активного администратора master-компании."
+                    }
+                )
+
         user = serializer.save()
 
         new_values = {
@@ -296,6 +323,26 @@ class UserAdminViewSet(viewsets.ModelViewSet):
             and user.company_id != current_user.company_id
         ):
             raise PermissionDenied("Slave admin can edit only users of their own company.")
+        
+        if (
+            user.is_active
+            and user.is_company_admin
+            and user.company_id
+            and user.company.company_type == Company.TYPE_MASTER
+        ):
+            active_master_admins_count = User.objects.filter(
+                company=user.company,
+                company__company_type=Company.TYPE_MASTER,
+                is_company_admin=True,
+                is_active=True,
+            ).count()
+
+            if active_master_admins_count <= 1:
+                raise ValidationError(
+                    {
+                        "detail": "Нельзя отключить единственного активного администратора master-компании."
+                    }
+                )
 
         old_values = {
             "is_active": user.is_active,

@@ -332,6 +332,10 @@ Docker Compose может использоваться для запуска б�
 - worker-сервис для email-напоминаний;
 - Cloudflare R2 как S3-compatible хранилище вложений.
 
+Для входа:  
+компания-получатель: логин - `master_admin` , пароль - `12345678`  
+компания-отправитель: логин - `slave_admin` , пароль - `12345678`
+
 Доспупно на период защит.   
 [Backend-swagger](https://pvaeexchmanager-production.up.railway.app/api/docs/#/)   
 [Веб-сервис](https://reccon-frontend-production.up.railway.app/auth)

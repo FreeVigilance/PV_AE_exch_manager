@@ -26,9 +26,17 @@ function getMessageSubject(subject) {
   return value || "Без темы";
 }
 
-function findMessageById(stages, messageId) {
+function findMessageById(stages, messageKey) {
+  const key = String(messageKey || "");
+
   for (const stage of stages || []) {
-    const found = (stage.messages || []).find((message) => message.id === messageId);
+    const found = (stage.messages || []).find((message) => {
+      const stageItemKey = message.stageItemId ? `stage-item:${message.stageItemId}` : "";
+      const messageIdKey = message.id ? `message:${message.id}` : "";
+
+      return stageItemKey === key || messageIdKey === key;
+    });
+
     if (found) return found;
   }
 
@@ -231,7 +239,7 @@ export default function ReconciliationDetailsPage() {
       setCurrentStageNumber(Number(targetStageNumber));
     }
 
-    setOpenedMessageId(targetMessageId);
+    setOpenedMessageId(`message:${targetMessageId}`);
 
     navigate(location.pathname, {
       replace: true,
@@ -940,12 +948,12 @@ export default function ReconciliationDetailsPage() {
                         }`}
                       role={canOpenStageMessage ? "button" : undefined}
                       tabIndex={canOpenStageMessage ? 0 : -1}
-                      onClick={() => handleOpenMessageInfo(message.id)}
+                      onClick={() => handleOpenMessageInfo(`stage-item:${message.stageItemId}`)}
                       onKeyDown={(event) => {
                         if (!canOpenStageMessage) return;
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          handleOpenMessageInfo(message.id);
+                          handleOpenMessageInfo(`stage-item:${message.stageItemId}`);
                         }
                       }}
                     >

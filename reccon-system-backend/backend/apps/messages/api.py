@@ -235,7 +235,7 @@ class FrontendMessageSerializer(serializers.ModelSerializer):
     text = serializers.CharField(source="body", allow_blank=True, required=False)
     html = serializers.CharField(source="body_html", allow_blank=True, required=False)
     date = serializers.SerializerMethodField()
-    sentAt = serializers.DateTimeField(source="created_at", read_only=True)
+    sentAt = serializers.SerializerMethodField()
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
     readAt = serializers.DateTimeField(source="read_at", read_only=True)
     confirmedAt = serializers.DateTimeField(source="confirmed_at", read_only=True)
@@ -294,7 +294,11 @@ class FrontendMessageSerializer(serializers.ModelSerializer):
         return STATUS_LABELS.get(obj.status, obj.status)
 
     def get_date(self, obj):
-        return format_front_date(obj.created_at)
+        return format_front_date(obj.sent_at or obj.created_at)
+
+    def get_sentAt(self, obj):
+        value = obj.sent_at or obj.created_at
+        return value.isoformat() if value else None
 
     def get_statusChangedAt(self, obj):
         value = obj.confirmed_at or obj.read_at or obj.updated_at
@@ -634,11 +638,13 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
                 draft.created_by = request.user
 
             draft.status = Message.STATUS_PENDING
+            draft.sent_at = timezone.now()
             draft.save(
                 update_fields=[
                     "sender_number",
                     "created_by",
                     "status",
+                    "sent_at",
                     "updated_at",
                 ]
             )
@@ -655,6 +661,7 @@ class MessageDraftViewSet(ActiveUserCompanyRequiredMixin, viewsets.ModelViewSet)
                     "created_by_id": draft.created_by_id,
                     "sender_company_id": draft.sender_company_id,
                     "receiver_company_id": draft.receiver_company_id,
+                    "sent_at": draft.sent_at.isoformat() if draft.sent_at else None,
                 },
                 reason="draft sent as message",
                 request=request,
@@ -1014,6 +1021,7 @@ class SentViewSet(ActiveUserCompanyRequiredMixin, viewsets.ReadOnlyModelViewSet)
                 created_by=request.user,
                 sender_number=generate_next_sender_number(company),
                 status=Message.STATUS_PENDING,
+                sent_at=timezone.now(),
                 subject=subject,
                 body=body,
                 body_html=body_html,

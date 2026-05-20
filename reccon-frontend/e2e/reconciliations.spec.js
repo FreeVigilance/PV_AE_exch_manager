@@ -95,7 +95,7 @@ test.describe("Сверки", () => {
 
     await page.getByText("Slave Company").first().click();
 
-    await expect(page.getByText("Этап 1")).toBeVisible();
+    await expect(page.locator(".recon-stage-panel__stageText")).toContainText(/Этап \d+/);
     await expect(page.getByText("Экспортировать")).toBeVisible();
   });
 

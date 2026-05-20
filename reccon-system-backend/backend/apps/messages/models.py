@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
 
-
 class Message(models.Model):
     STATUS_DRAFT = "draft"
     STATUS_PENDING = "pending"
@@ -60,6 +59,7 @@ class Message(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
 
     read_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)

@@ -211,7 +211,7 @@
   text-overflow: ellipsis;
 }
 
-.recon-details__tableHead .recon-details__headCell:nth-child(3) {
+/* .recon-details__tableHead .recon-details__headCell:nth-child(3) {
   transform: translateX(12px);
 }
 
@@ -221,7 +221,7 @@
 
 .recon-details__tableHead .recon-details__headCell:nth-child(5) {
   transform: translateX(12px);
-}
+} */
 
 .recon-details__headCell--selector {
   justify-content: flex-end;

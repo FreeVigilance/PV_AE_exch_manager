@@ -2,7 +2,7 @@ from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.common.responses import ok
@@ -350,6 +350,19 @@ class CompanyAdminViewSet(AdminAccessMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="toggle-status")
     def toggle_status(self, request, pk=None):
         company = self.get_object()
+
+        if company.is_active and company.company_type == Company.TYPE_MASTER:
+            active_master_companies_count = Company.objects.filter(
+                company_type=Company.TYPE_MASTER,
+                is_active=True,
+            ).count()
+
+            if active_master_companies_count <= 1:
+                raise ValidationError(
+                    {
+                        "detail": "Нельзя отключить единственную активную master-компанию."
+                    }
+                )
 
         old_values = {
             "is_active": company.is_active,

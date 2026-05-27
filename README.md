@@ -197,8 +197,8 @@ PV_AE_exch_manager/
         │   ├── attachments/                 # Вложения и работа с объектным хранилищем
         │   ├── reconciliations/             # Сверки, этапы, чат, экспорт XLSX
         │   ├── notifications/               # Уведомления и напоминания
-        │   ├── audit/                       # Журнал действий пользователей
-        │   └── outbox/                      # Служебные фоновые задачи
+        │   └── audit/                       # Журнал действий пользователей
+        │   
         ├── config/                          # Настройки Django-проекта
         ├── manage.py                        # CLI Django
         └── requirements.txt                 # Python-зависимости backend
